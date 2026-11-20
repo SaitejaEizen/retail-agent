@@ -9,6 +9,7 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
 
 
 DEFAULT_MESSAGES: dict[ErrorCode, str] = {
@@ -17,6 +18,7 @@ DEFAULT_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.NOT_FOUND: "The requested resource was not found.",
     ErrorCode.METHOD_NOT_ALLOWED: "This method is not allowed for this resource.",
     ErrorCode.INTERNAL_ERROR: "An unexpected error occurred.",
+    ErrorCode.ORDER_NOT_FOUND: "Order not found.",
 }
 
 

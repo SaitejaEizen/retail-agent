@@ -37,6 +37,25 @@ def test_domain_imports_no_framework_db_or_other_app_package() -> None:
     assert not violations
 
 
+CLOCK_MODULE = ROOT / "app" / "infra" / "clock.py"
+TIME_CALLS = {("datetime", "now"), ("datetime", "utcnow"), ("datetime", "today"), ("date", "today")}
+
+
+def test_time_is_read_only_through_clock() -> None:
+    """FR2 / AD-4: nothing outside app/infra/clock.py calls datetime.now() or date.today()."""
+    violations = []
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        if path == CLOCK_MODULE:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                owner = node.func.value
+                name = owner.attr if isinstance(owner, ast.Attribute) else getattr(owner, "id", "")
+                if (name, node.func.attr) in TIME_CALLS:
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not violations
+
+
 def test_layered_package_tree_exists() -> None:
     """FR9 / AD-1: the service has the layered packages from the architecture spine."""
     for package in ("api", "services", "domain", "repositories", "infra"):
