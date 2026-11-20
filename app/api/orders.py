@@ -14,8 +14,10 @@ from app.api.schemas import (
     OrderLookupResponse,
 )
 from app.infra.clock import Clock
+from app.repositories.audit import AuditRepository
 from app.repositories.orders import OrderRepository
 from app.repositories.returns import ReturnRepository
+from app.services.audit_service import AuditService
 from app.services.order_service import OrderService
 
 router = APIRouter(tags=["orders"])
@@ -35,7 +37,8 @@ def lookup_order(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
     clock: Annotated[Clock, Depends(get_clock)],
 ) -> OrderLookupResponse:
-    service = OrderService(OrderRepository(conn), ReturnRepository(conn))
+    audit = AuditService(conn, AuditRepository(conn, clock))
+    service = OrderService(OrderRepository(conn), ReturnRepository(conn), audit)
     result = service.lookup(body.order_id, body.email, clock.today())
     order = result.order
     return OrderLookupResponse(

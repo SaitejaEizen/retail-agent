@@ -3,9 +3,10 @@
 import sqlite3
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.domain import rules
+from app.domain.audit import AuditAction, AuditOutcome
 from app.domain.errors import DomainError, ErrorCode
 from app.domain.models import Order, Return, ReturnLine
 from app.repositories.inventory import InventoryRepository
@@ -34,15 +35,28 @@ class InventoryStore(Protocol):
     def restock(self, sku: str, quantity: int) -> None: ...
 
 
+class AuditWriter(Protocol):
+    def record(
+        self,
+        action: AuditAction,
+        order_id: str | None,
+        outcome: AuditOutcome,
+        details: Mapping[str, Any],
+        email: str | None = None,
+    ) -> None: ...
+
+
 class ReturnService:
     def __init__(
         self,
         conn: sqlite3.Connection,
+        audit: AuditWriter,
         orders: OrderReader | None = None,
         returns: ReturnStore | None = None,
         inventory: InventoryStore | None = None,
     ) -> None:
         self._conn = conn
+        self._audit = audit
         self._orders = orders or OrderRepository(conn)
         self._returns = returns or ReturnRepository(conn)
         self._inventory = inventory or InventoryRepository(conn)
@@ -55,10 +69,12 @@ class ReturnService:
         reason: str | None,
         now: datetime,
     ) -> Return:
-        """Validate and record one Return, its Refund and Restock in a single transaction.
+        """Validate and record one Return, its Refund, Restock and Audit Entries atomically.
 
-        ``lines`` maps order line ID to quantity. Any error rolls back every write.
+        ``lines`` maps order line ID to quantity. Any error rolls back every write; a
+        DomainError rejection is then audited in its own committed transaction (AD-5).
         """
+        requested = [{"line_id": line_id, "quantity": qty} for line_id, qty in lines.items()]
         created_at = now.astimezone(UTC).replace(microsecond=0)
         self._conn.execute("BEGIN IMMEDIATE")
         try:
@@ -83,7 +99,44 @@ class ReturnService:
             return_id = self._returns.insert(order_id, reason, refund, created_at, return_lines)
             for line in return_lines:
                 self._inventory.restock(line.sku, line.quantity)
+            self._audit.record(
+                AuditAction.RETURN_REQUESTED,
+                order_id,
+                AuditOutcome.SUCCESS,
+                {"return_id": return_id, "lines": requested, "reason": reason},
+                email,
+            )
+            self._audit.record(
+                AuditAction.REFUND_CALCULATED,
+                order_id,
+                AuditOutcome.SUCCESS,
+                {"return_id": return_id, "refund_cents": refund},
+                email,
+            )
+            self._audit.record(
+                AuditAction.RESTOCK_APPLIED,
+                order_id,
+                AuditOutcome.SUCCESS,
+                {
+                    "return_id": return_id,
+                    "items": [
+                        {"sku": line.sku, "quantity": line.quantity} for line in return_lines
+                    ],
+                },
+                email,
+            )
             self._conn.commit()
+        except DomainError as err:
+            self._conn.rollback()
+            with self._conn:
+                self._audit.record(
+                    AuditAction.RETURN_REQUESTED,
+                    order_id,
+                    AuditOutcome.REJECTED,
+                    {"error_code": err.code.value, "lines": requested, "reason": reason},
+                    email,
+                )
+            raise
         except BaseException:
             self._conn.rollback()
             raise

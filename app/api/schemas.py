@@ -1,7 +1,7 @@
 """Pydantic request/response models. The only place Pydantic is used (AD-8)."""
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -80,3 +80,17 @@ class OrderLookupResponse(BaseModel):
     return_window_ends_on: date | None
     is_returnable: bool
     returns: list[ReturnSummary]
+
+
+class AuditEntryResponse(BaseModel):
+    id: int
+    created_at: datetime
+    action: Literal["ORDER_LOOKUP", "RETURN_REQUESTED", "REFUND_CALCULATED", "RESTOCK_APPLIED"]
+    outcome: Literal["success", "rejected", "not_found"]
+    order_id: str | None
+    masked_email: str | None
+    details: dict[str, Any]
+
+
+class AuditListResponse(BaseModel):
+    entries: list[AuditEntryResponse]

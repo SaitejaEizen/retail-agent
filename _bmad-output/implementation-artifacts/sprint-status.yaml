@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-19-2026 16:13
-last_updated: 11-19-2026 18:19
+last_updated: 11-19-2026 18:39
 project: retail-agent
 project_key: NOKEY
 tracking_system: file-system
@@ -40,7 +40,7 @@ development_status:
   1-2-look-up-an-order-and-see-return-eligibility: done
   epic-1-retrospective: optional
 
-  epic-2: in-progress
-  2-1-return-items-and-receive-a-refund: review
-  2-2-trace-every-action-in-the-audit-trail: backlog
+  epic-2: done
+  2-1-return-items-and-receive-a-refund: done
+  2-2-trace-every-action-in-the-audit-trail: done
   epic-2-retrospective: optional

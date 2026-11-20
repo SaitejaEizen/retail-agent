@@ -36,8 +36,16 @@ class _Returns:
         return self._returns
 
 
-def _service(returns: tuple[Return, ...] = ()) -> OrderService:
-    return OrderService(_Repo(), _Returns(returns))
+class _Audit:
+    def __init__(self) -> None:
+        self.entries: list[tuple] = []
+
+    def record_committed(self, action, order_id, outcome, details, email=None) -> None:
+        self.entries.append((action, order_id, outcome, dict(details), email))
+
+
+def _service(returns: tuple[Return, ...] = (), audit: _Audit | None = None) -> OrderService:
+    return OrderService(_Repo(), _Returns(returns), audit or _Audit())
 
 
 def test_lookup_returns_order_with_eligibility() -> None:
@@ -95,3 +103,26 @@ def test_fully_returned_order_is_not_returnable_on_lookup() -> None:
     result = _service(existing).lookup("ORD-1001", "asha@example.com", date(2026, 11, 19))
     assert [v.returnable_quantity for v in result.lines] == [0, 0]
     assert result.is_returnable is False
+
+
+def test_lookup_hit_records_success_entry() -> None:
+    """FR7: a successful lookup commits one ORDER_LOOKUP success entry with the caller's email."""
+    audit = _Audit()
+    _service(audit=audit).lookup("ORD-1001", "Asha@Example.com", date(2026, 11, 19))
+    assert audit.entries == [
+        ("ORDER_LOOKUP", "ORD-1001", "success",
+         {"status": "delivered", "is_returnable": True}, "Asha@Example.com"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("order_id", "email"), [("ORD-9999", "asha@example.com"), ("ORD-1001", "ben@example.com")]
+)
+def test_lookup_miss_records_not_found_entry(order_id: str, email: str) -> None:
+    """FR7: a lookup that finds nothing still commits one ORDER_LOOKUP not_found entry."""
+    audit = _Audit()
+    with pytest.raises(DomainError):
+        _service(audit=audit).lookup(order_id, email, date(2026, 11, 19))
+    assert audit.entries == [
+        ("ORDER_LOOKUP", order_id, "not_found", {"error_code": "ORDER_NOT_FOUND"}, email),
+    ]

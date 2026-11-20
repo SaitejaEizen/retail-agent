@@ -44,3 +44,27 @@ CREATE TABLE IF NOT EXISTS return_lines (
     quantity       INTEGER NOT NULL CHECK (quantity > 0),
     refund_cents   INTEGER NOT NULL CHECK (refund_cents >= 0)
 );
+
+-- Append-only audit trail (AD-5). Only AuditRepository.record inserts here.
+CREATE TABLE IF NOT EXISTS audit_entries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at   TEXT NOT NULL,
+    action       TEXT NOT NULL CHECK (action IN
+                 ('ORDER_LOOKUP', 'RETURN_REQUESTED', 'REFUND_CALCULATED', 'RESTOCK_APPLIED')),
+    outcome      TEXT NOT NULL CHECK (outcome IN ('success', 'rejected', 'not_found')),
+    order_id     TEXT,
+    masked_email TEXT,
+    details      TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS audit_entries_no_update
+BEFORE UPDATE ON audit_entries
+BEGIN
+    SELECT RAISE(ABORT, 'audit_entries is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_entries_no_delete
+BEFORE DELETE ON audit_entries
+BEGIN
+    SELECT RAISE(ABORT, 'audit_entries is append-only');
+END;

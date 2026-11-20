@@ -15,6 +15,7 @@ from app.api.schemas import (
 )
 from app.domain.models import Return
 from app.infra.clock import Clock
+from app.repositories.audit import AuditRepository
 from app.services.return_service import ReturnService
 
 router = APIRouter(tags=["returns"])
@@ -61,7 +62,7 @@ def create_return(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
     clock: Annotated[Clock, Depends(get_clock)],
 ) -> ReturnResponse:
-    ret = ReturnService(conn).create_return(
+    ret = ReturnService(conn, AuditRepository(conn, clock)).create_return(
         order_id=body.order_id,
         email=body.email,
         lines={line.line_id: line.quantity for line in body.lines},

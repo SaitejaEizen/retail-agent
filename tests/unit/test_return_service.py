@@ -1,5 +1,6 @@
 """ReturnService against a real temporary SQLite file (transaction behaviour needs a DB)."""
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -8,13 +9,19 @@ from pathlib import Path
 import pytest
 
 from app.domain.errors import DomainError, ErrorCode
+from app.infra.clock import FixedClock
 from app.infra.db import connect, init_db
+from app.repositories.audit import AuditRepository
 from app.repositories.inventory import InventoryRepository
 from app.repositories.returns import ReturnRepository
 from app.services.return_service import ReturnService
 
 SEED_DAY = date(2026, 11, 19)
 NOW = datetime(2026, 11, 19, 9, 30, 15, 123456, tzinfo=UTC)
+
+
+def _service(conn: sqlite3.Connection, **overrides) -> ReturnService:
+    return ReturnService(conn, AuditRepository(conn, FixedClock(NOW)), **overrides)
 
 
 @pytest.fixture
@@ -50,7 +57,7 @@ def test_accepted_return_writes_return_and_restocks(conn: sqlite3.Connection) ->
     mug, bag = _line_id(conn, "ORD-1001", "MUG-001"), _line_id(conn, "ORD-1001", "BAG-003")
     mug_before, bag_before = _on_hand(conn, "MUG-001"), _on_hand(conn, "BAG-003")
 
-    ret = ReturnService(conn).create_return(
+    ret = _service(conn).create_return(
         "ORD-1001", "asha@example.com", {mug: 2, bag: 1}, "Cracked", NOW
     )
 
@@ -78,7 +85,7 @@ def test_failure_after_return_insert_rolls_everything_back(conn: sqlite3.Connect
     """NFR1 / FR6: a failure after the Return insert leaves no Return and Inventory unchanged."""
     mug = _line_id(conn, "ORD-1001", "MUG-001")
     before = _on_hand(conn, "MUG-001")
-    service = ReturnService(conn, inventory=_FailingInventory())
+    service = _service(conn, inventory=_FailingInventory())
     with pytest.raises(RuntimeError):
         service.create_return("ORD-1001", "asha@example.com", {mug: 1}, None, NOW)
     assert not conn.in_transaction
@@ -99,7 +106,7 @@ def test_partial_restock_failure_rolls_back_earlier_restock(conn: sqlite3.Connec
             super().restock(sku, quantity)
 
     with pytest.raises(RuntimeError):
-        ReturnService(conn, inventory=_FailOnBag(conn)).create_return(
+        _service(conn, inventory=_FailOnBag(conn)).create_return(
             "ORD-1001", "asha@example.com", {mug: 1, bag: 1}, None, NOW
         )
     assert _on_hand(conn, "MUG-001") == before
@@ -115,7 +122,7 @@ def test_missing_inventory_row_fails_and_rolls_back(conn: sqlite3.Connection) ->
     conn.commit()
     mug = _line_id(conn, "ORD-1001", "MUG-001")
     with pytest.raises(LookupError):
-        ReturnService(conn).create_return("ORD-1001", "asha@example.com", {mug: 1}, None, NOW)
+        _service(conn).create_return("ORD-1001", "asha@example.com", {mug: 1}, None, NOW)
     assert _count(conn, "returns") == 0
 
 
@@ -145,7 +152,7 @@ def test_rejections_change_nothing(
     stock = "SELECT sku, on_hand FROM inventory ORDER BY sku"
     stock_before = conn.execute(stock).fetchall()
     with pytest.raises(DomainError) as info:
-        ReturnService(conn).create_return(order_id, email, lines, None, now)
+        _service(conn).create_return(order_id, email, lines, None, now)
     assert info.value.code is code
     assert not conn.in_transaction
     assert _count(conn, "returns") == 0
@@ -161,12 +168,101 @@ def test_write_lock_serialises_concurrent_returns(db: Path) -> None:
         with pytest.raises(sqlite3.OperationalError, match="locked"):
             second.execute("BEGIN IMMEDIATE")
         first.rollback()
-        ReturnService(first).create_return("ORD-1001", "asha@example.com", {mug: 2}, None, NOW)
+        _service(first).create_return("ORD-1001", "asha@example.com", {mug: 2}, None, NOW)
         with pytest.raises(DomainError) as info:
-            ReturnService(third).create_return(
+            _service(third).create_return(
                 "ORD-1001", "asha@example.com", {mug: 1}, None, NOW
             )
         assert info.value.code is ErrorCode.INVALID_QUANTITY
     finally:
         for connection in (first, second, third):
             connection.close()
+
+
+def _audit_rows(conn: sqlite3.Connection) -> list[tuple]:
+    return [
+        (row["action"], row["outcome"], row["order_id"], row["masked_email"],
+         json.loads(row["details"]))
+        for row in conn.execute("SELECT * FROM audit_entries ORDER BY id")
+    ]
+
+
+def test_accepted_return_writes_three_audit_entries(conn: sqlite3.Connection) -> None:
+    """FR7: an accepted Return writes RETURN_REQUESTED, REFUND_CALCULATED and RESTOCK_APPLIED."""
+    mug, bag = _line_id(conn, "ORD-1001", "MUG-001"), _line_id(conn, "ORD-1001", "BAG-003")
+    ret = _service(conn).create_return(
+        "ORD-1001", "asha@example.com", {mug: 2, bag: 1}, "Cracked", NOW
+    )
+    rid = ret.return_id
+    assert _audit_rows(conn) == [
+        ("RETURN_REQUESTED", "success", "ORD-1001", "a***@example.com",
+         {"return_id": rid, "reason": "Cracked",
+          "lines": [{"line_id": mug, "quantity": 2}, {"line_id": bag, "quantity": 1}]}),
+        ("REFUND_CALCULATED", "success", "ORD-1001", "a***@example.com",
+         {"return_id": rid, "refund_cents": 3399}),
+        ("RESTOCK_APPLIED", "success", "ORD-1001", "a***@example.com",
+         {"return_id": rid, "items": [{"sku": "MUG-001", "quantity": 2},
+                                      {"sku": "BAG-003", "quantity": 1}]}),
+    ]
+
+
+class _AuditFailingOnRestockEntry(AuditRepository):
+    def record(self, action, order_id, outcome, details, email=None) -> None:
+        super().record(action, order_id, outcome, details, email)
+        if action == "RESTOCK_APPLIED":
+            raise RuntimeError("audit disk full")
+
+
+def test_failure_after_audit_writes_rolls_back_entries(conn: sqlite3.Connection) -> None:
+    """NFR1 / FR7: a failure after audit writes leaves no Return, stock change or entry."""
+    mug = _line_id(conn, "ORD-1001", "MUG-001")
+    before = _on_hand(conn, "MUG-001")
+    audit = _AuditFailingOnRestockEntry(conn, FixedClock(NOW))
+    with pytest.raises(RuntimeError):
+        ReturnService(conn, audit).create_return(
+            "ORD-1001", "asha@example.com", {mug: 1}, None, NOW
+        )
+    assert _audit_rows(conn) == []
+    assert _count(conn, "returns") == 0
+    assert _on_hand(conn, "MUG-001") == before
+
+
+def test_unexpected_failure_is_not_audited(conn: sqlite3.Connection) -> None:
+    """FR7 / NFR1: a non-domain failure rolls back and writes no rejection entry."""
+    mug = _line_id(conn, "ORD-1001", "MUG-001")
+    with pytest.raises(RuntimeError):
+        _service(conn, inventory=_FailingInventory()).create_return(
+            "ORD-1001", "asha@example.com", {mug: 1}, None, NOW
+        )
+    assert _audit_rows(conn) == []
+
+
+@pytest.mark.parametrize(
+    ("order_id", "email", "lines", "code"),
+    [
+        ("ORD-9999", "asha@example.com", {1: 1}, "ORDER_NOT_FOUND"),
+        ("ORD-1001", "ben@example.com", {1: 1}, "ORDER_NOT_FOUND"),
+        ("ORD-1004", "dana@example.com", {6: 1}, "ORDER_NOT_DELIVERED"),
+        ("ORD-1001", "asha@example.com", {999: 1}, "LINE_NOT_ON_ORDER"),
+        ("ORD-1001", "asha@example.com", {1: 5}, "INVALID_QUANTITY"),
+    ],
+)
+def test_rejection_commits_one_rejected_entry(
+    conn: sqlite3.Connection, order_id: str, email: str, lines: dict, code: str
+) -> None:
+    """FR4 / FR7: a refused return commits one RETURN_REQUESTED rejected entry with error_code."""
+    with pytest.raises(DomainError):
+        _service(conn).create_return(order_id, email, lines, "why", NOW)
+    assert not conn.in_transaction
+    conn.rollback()  # nothing pending: the entry was already committed
+    rows = _audit_rows(conn)
+    assert len(rows) == 1
+    action, outcome, logged_order, masked, details = rows[0]
+    assert (action, outcome, logged_order) == ("RETURN_REQUESTED", "rejected", order_id)
+    assert masked == f"{email[0]}***@example.com"
+    assert details == {
+        "error_code": code,
+        "reason": "why",
+        "lines": [{"line_id": k, "quantity": v} for k, v in lines.items()],
+    }
+    assert _count(conn, "returns") == 0

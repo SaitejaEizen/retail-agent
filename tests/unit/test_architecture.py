@@ -56,6 +56,16 @@ def test_time_is_read_only_through_clock() -> None:
     assert not violations
 
 
+def test_only_audit_repository_writes_audit_entries() -> None:
+    """FR7 / AD-5: INSERT INTO audit_entries appears only in app/repositories/audit.py."""
+    writers = [
+        str(path.relative_to(ROOT))
+        for path in sorted((ROOT / "app").rglob("*.py"))
+        if "insert into audit_entries" in path.read_text(encoding="utf-8").lower()
+    ]
+    assert writers == ["app/repositories/audit.py"]
+
+
 def test_layered_package_tree_exists() -> None:
     """FR9 / AD-1: the service has the layered packages from the architecture spine."""
     for package in ("api", "services", "domain", "repositories", "infra"):
