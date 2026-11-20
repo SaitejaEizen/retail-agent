@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "BMAD installer file manifest: file checksums, not secrets"
+paths = ['''_bmad/_config/files-manifest\.csv''']
