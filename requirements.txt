@@ -1,0 +1,4 @@
+# Runtime dependencies. Versions pinned per the architecture spine Stack table.
+fastapi==0.165.0
+pydantic==2.14.3
+uvicorn==0.54.0

@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.env
+.env.*
+data
+tests
+docs
+_bmad
+_bmad-output
+.claude
+**/__pycache__
+*.pyc
+.coverage
+htmlcov
+.pytest_cache
+.ruff_cache

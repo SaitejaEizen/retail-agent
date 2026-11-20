@@ -1,0 +1,7 @@
+# Development and CI tooling. Versions pinned per the architecture spine Stack table.
+-r requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+httpx==0.28.1
+ruff==0.17.5
+pip-audit==2.10.1
