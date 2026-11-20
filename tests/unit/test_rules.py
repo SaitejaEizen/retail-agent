@@ -3,6 +3,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.domain import rules
+from app.domain.errors import DomainError, ErrorCode
 from app.domain.models import Order, OrderLine, OrderStatus
 
 DELIVERED_ON = date(2026, 10, 20)
@@ -85,3 +86,73 @@ def test_order_total_is_integer_cents() -> None:
 def test_email_matching_ignores_case(given: str, expected: bool) -> None:
     """FR1: email matching ignores letter case and surrounding spaces."""
     assert rules.email_matches("asha@example.com", given) is expected
+
+
+TODAY = DELIVERED_ON + timedelta(days=12)
+
+
+def _code(order, requested, returned=None, today=TODAY) -> ErrorCode | None:
+    try:
+        rules.check_return_eligibility(order, requested, returned or {}, today)
+    except DomainError as err:
+        return err.code
+    return None
+
+
+def test_eligible_request_passes() -> None:
+    """FR3 / FR4: a delivered Order inside the window with valid quantities is eligible."""
+    assert _code(_order(), {1: 2, 2: 1}) is None
+    assert _code(_order(), {1: 1}, today=DELIVERED_ON + timedelta(days=30)) is None
+
+
+@pytest.mark.parametrize(
+    "status", [OrderStatus.PLACED, OrderStatus.SHIPPED, OrderStatus.CANCELLED]
+)
+def test_not_delivered_is_rejected(status: OrderStatus) -> None:
+    """FR4: Orders that aren't delivered are rejected with ORDER_NOT_DELIVERED."""
+    assert _code(_order(status=status, delivered_on=None), {1: 1}) is ErrorCode.ORDER_NOT_DELIVERED
+
+
+def test_day_31_is_rejected() -> None:
+    """FR4: a request on day 31 after delivery is rejected with RETURN_WINDOW_EXPIRED."""
+    late = DELIVERED_ON + timedelta(days=31)
+    assert _code(_order(), {1: 1}, today=late) is ErrorCode.RETURN_WINDOW_EXPIRED
+
+
+@pytest.mark.parametrize("quantity", [0, -1, 3])
+def test_bad_quantity_is_rejected(quantity: int) -> None:
+    """FR4: a quantity ≤ 0 or above the Returnable Quantity is rejected with INVALID_QUANTITY."""
+    assert _code(_order(), {1: quantity}) is ErrorCode.INVALID_QUANTITY
+
+
+def test_quantity_counts_earlier_returns() -> None:
+    """FR3 / FR4: 1 of 2 already returned allows 1 more, but not 2."""
+    assert _code(_order(), {1: 1}, {1: 1}) is None
+    assert _code(_order(), {1: 2}, {1: 1}) is ErrorCode.INVALID_QUANTITY
+    assert _code(_order(), {1: 1}, {1: 2}) is ErrorCode.INVALID_QUANTITY
+
+
+def test_unknown_line_is_rejected() -> None:
+    """FR4: a line that isn't on the Order is rejected with LINE_NOT_ON_ORDER."""
+    assert _code(_order(), {1: 1, 99: 1}) is ErrorCode.LINE_NOT_ON_ORDER
+
+
+def test_empty_request_is_rejected() -> None:
+    """FR4: a request with no lines is rejected with INVALID_QUANTITY."""
+    assert _code(_order(), {}) is ErrorCode.INVALID_QUANTITY
+
+
+def test_check_order_status_before_window_before_line_before_quantity() -> None:
+    """FR4: when several rules fail, the first in the fixed order is reported."""
+    late = DELIVERED_ON + timedelta(days=40)
+    assert _code(_order(), {99: 0}, today=late) is ErrorCode.RETURN_WINDOW_EXPIRED
+    assert _code(_order(), {99: 1, 1: 0}) is ErrorCode.LINE_NOT_ON_ORDER
+
+
+def test_refund_is_unit_price_times_quantity() -> None:
+    """FR5: the Refund is the sum of unit price × quantity returned, in integer cents."""
+    order = _order()
+    assert rules.refund_cents(order, {1: 1}) == 1250
+    assert rules.refund_cents(order, {1: 2, 2: 1}) == 3399
+    assert rules.line_refund_cents(order.lines[1], 1) == 899
+    assert isinstance(rules.refund_cents(order, {1: 2}), int)

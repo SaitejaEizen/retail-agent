@@ -19,6 +19,10 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.METHOD_NOT_ALLOWED: 405,
     ErrorCode.INTERNAL_ERROR: 500,
     ErrorCode.ORDER_NOT_FOUND: 404,
+    ErrorCode.ORDER_NOT_DELIVERED: 422,
+    ErrorCode.RETURN_WINDOW_EXPIRED: 422,
+    ErrorCode.INVALID_QUANTITY: 422,
+    ErrorCode.LINE_NOT_ON_ORDER: 422,
 }
 
 CODE_BY_HTTP_STATUS: dict[int, ErrorCode] = {

@@ -14,10 +14,13 @@ def test_openapi_lists_every_endpoint(client: TestClient) -> None:
     """FR9: the API docs cover every endpoint the app exposes."""
     spec = client.get("/openapi.json").json()
     # Update this set as stories add endpoints.
-    assert set(spec["paths"]) == {"/healthz", "/orders/lookup"}
+    assert set(spec["paths"]) == {"/healthz", "/orders/lookup", "/returns"}
     lookup = spec["paths"]["/orders/lookup"]["post"]
     assert "requestBody" in lookup
     assert set(lookup["responses"]) >= {"200", "404", "422"}
+    returns = spec["paths"]["/returns"]["post"]
+    assert "requestBody" in returns
+    assert set(returns["responses"]) >= {"201", "404", "422"}
     assert set(spec["paths"]["/healthz"]["get"]["responses"]) >= {"200", "503"}
 
 

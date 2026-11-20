@@ -10,6 +10,10 @@ class ErrorCode(StrEnum):
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
+    ORDER_NOT_DELIVERED = "ORDER_NOT_DELIVERED"
+    RETURN_WINDOW_EXPIRED = "RETURN_WINDOW_EXPIRED"
+    INVALID_QUANTITY = "INVALID_QUANTITY"
+    LINE_NOT_ON_ORDER = "LINE_NOT_ON_ORDER"
 
 
 DEFAULT_MESSAGES: dict[ErrorCode, str] = {
@@ -19,6 +23,12 @@ DEFAULT_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.METHOD_NOT_ALLOWED: "This method is not allowed for this resource.",
     ErrorCode.INTERNAL_ERROR: "An unexpected error occurred.",
     ErrorCode.ORDER_NOT_FOUND: "Order not found.",
+    ErrorCode.ORDER_NOT_DELIVERED: "Only delivered orders can be returned.",
+    ErrorCode.RETURN_WINDOW_EXPIRED: "The 30-day return window for this order has closed.",
+    ErrorCode.INVALID_QUANTITY: (
+        "Each quantity must be at least 1 and no more than the line's returnable quantity."
+    ),
+    ErrorCode.LINE_NOT_ON_ORDER: "One or more lines are not on this order.",
 }
 
 

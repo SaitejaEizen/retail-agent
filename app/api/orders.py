@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_clock, get_connection
+from app.api.returns import to_return_summary
 from app.api.schemas import (
     ErrorResponse,
     LookupRequest,
@@ -14,6 +15,7 @@ from app.api.schemas import (
 )
 from app.infra.clock import Clock
 from app.repositories.orders import OrderRepository
+from app.repositories.returns import ReturnRepository
 from app.services.order_service import OrderService
 
 router = APIRouter(tags=["orders"])
@@ -33,7 +35,8 @@ def lookup_order(
     conn: Annotated[sqlite3.Connection, Depends(get_connection)],
     clock: Annotated[Clock, Depends(get_clock)],
 ) -> OrderLookupResponse:
-    result = OrderService(OrderRepository(conn)).lookup(body.order_id, body.email, clock.today())
+    service = OrderService(OrderRepository(conn), ReturnRepository(conn))
+    result = service.lookup(body.order_id, body.email, clock.today())
     order = result.order
     return OrderLookupResponse(
         order_id=order.order_id,
@@ -52,5 +55,5 @@ def lookup_order(
         total_cents=result.total_cents,
         return_window_ends_on=result.return_window_ends_on,
         is_returnable=result.is_returnable,
-        returns=[],
+        returns=[to_return_summary(ret) for ret in result.returns],
     )

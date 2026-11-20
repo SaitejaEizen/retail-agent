@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, orders
+from app.api import health, orders, returns
 from app.api.errors import register_error_handlers
 from app.infra.clock import Clock, SystemClock
 from app.infra.db import init_db
@@ -44,6 +44,7 @@ def create_app(settings: Settings | None = None, clock: Clock | None = None) -> 
     register_error_handlers(app)
     app.include_router(health.router)
     app.include_router(orders.router)
+    app.include_router(returns.router)
     return app
 
 

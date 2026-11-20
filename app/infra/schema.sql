@@ -28,3 +28,19 @@ CREATE TABLE IF NOT EXISTS order_lines (
     quantity         INTEGER NOT NULL CHECK (quantity > 0),
     unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0)
 );
+
+CREATE TABLE IF NOT EXISTS returns (
+    return_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     TEXT NOT NULL REFERENCES orders (order_id),
+    reason       TEXT,
+    refund_cents INTEGER NOT NULL CHECK (refund_cents >= 0),
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS return_lines (
+    return_line_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    return_id      INTEGER NOT NULL REFERENCES returns (return_id),
+    line_id        INTEGER NOT NULL REFERENCES order_lines (line_id),
+    quantity       INTEGER NOT NULL CHECK (quantity > 0),
+    refund_cents   INTEGER NOT NULL CHECK (refund_cents >= 0)
+);

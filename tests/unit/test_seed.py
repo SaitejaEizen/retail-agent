@@ -17,7 +17,7 @@ def _orders(db: Path) -> list[sqlite3.Row]:
 
 
 def test_schema_creates_only_story_tables(tmp_path: Path) -> None:
-    """FR10 / AD-7: schema.sql creates exactly products, inventory, orders and order_lines."""
+    """FR3 / FR10 / AD-7: schema.sql creates the catalogue, order and return tables only."""
     db = tmp_path / "retail.db"
     init_db(db, REF)
     conn = connect(db)
@@ -30,7 +30,7 @@ def test_schema_creates_only_story_tables(tmp_path: Path) -> None:
         }
     finally:
         conn.close()
-    assert tables == {"products", "inventory", "orders", "order_lines"}
+    assert tables == {"products", "inventory", "orders", "order_lines", "returns", "return_lines"}
 
 
 def test_seed_covers_every_status_and_window_case(tmp_path: Path) -> None:
