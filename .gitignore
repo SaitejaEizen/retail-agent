@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+dist/
+build/
+.coverage
+htmlcov/
+node_modules/
+.DS_Store
+.claude/settings.local.json
+_bmad/config.user.toml
